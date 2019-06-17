@@ -22,7 +22,7 @@ class Graphiti::Util::ValidationResponse
   # Check to ensure no validation errors.
   # @return [Boolean] did the persistence call succeed?
   def success?
-    all_valid?(object, relationships)
+    all_valid?(object, relationships) && valid_after_graph_persisted?
   end
 
   # @return [Array] the object and success state
@@ -78,5 +78,28 @@ class Graphiti::Util::ValidationResponse
       end
     end
     checks.all? { |c| c == true }
+  end
+
+  def valid_after_graph_persisted?
+    validate_after_graph_persisted!(object, relationships)
+    all_valid?(object, relationships)
+  end
+
+  def validate_after_graph_persisted!(model, deserialized_params)
+    return unless model.respond_to?(:valid?)
+    model.valid?(:after_graph_persisted)
+    deserialized_params.each_pair do |name, payload|
+      if payload.is_a?(Array)
+        related_objects = model.send(name)
+        related_objects.each_with_index do |r, index|
+          method = payload[index].try(:[], :meta).try(:[], :method)
+          next if [nil, :destroy, :disassociate].include?(method)
+          validate_after_graph_persisted!(r, payload[index][:relationships] || {})
+        end
+      else
+        related_object = model.send(name)
+        validate_after_graph_persisted!(related_object, payload[:relationships] || {})
+      end
+    end
   end
 end
